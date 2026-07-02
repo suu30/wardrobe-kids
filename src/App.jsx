@@ -1,277 +1,274 @@
 import { useEffect, useMemo, useState } from 'react'
 
-const STORAGE_KEY = 'wardrobe-kids-v1'
+const STORAGE_KEY = 'watashi-no-code-cho-v1'
 
-const CATEGORIES = ['トップス', 'ボトムス', 'アウター', 'ワンピース', '肌着・パジャマ', 'くつ', '小物']
-const SEASONS = ['オールシーズン', '春夏', '秋冬']
-const STATUSES = {
-  active: { label: '使用中', cls: 'st-active' },
-  sizeout: { label: 'サイズアウト', cls: 'st-sizeout' },
-  handmedown: { label: 'お下がり待ち', cls: 'st-handme' },
-}
+const CATEGORIES = [
+  { name: 'トップス', emoji: '👕' },
+  { name: 'ボトムス', emoji: '👖' },
+  { name: 'ワンピース', emoji: '👗' },
+  { name: 'アウター', emoji: '🧥' },
+  { name: 'くつ', emoji: '👟' },
+  { name: 'ぼうし', emoji: '🧢' },
+  { name: 'こもの', emoji: '🎀' },
+]
 
-const DEFAULT_DATA = {
-  kids: [
-    { id: 'k1', name: 'うえの子', size: '120' },
-    { id: 'k2', name: 'したの子', size: '95' },
-  ],
-  items: [],
-}
+const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土']
+
+const DEFAULT_DATA = { items: [], log: {} } // log: { 'YYYY-MM-DD': [itemId, ...] }
 
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return DEFAULT_DATA
-    const parsed = JSON.parse(raw)
-    if (!parsed.kids || !parsed.items) return DEFAULT_DATA
-    return parsed
+    const p = JSON.parse(raw)
+    return { items: p.items || [], log: p.log || {} }
   } catch {
     return DEFAULT_DATA
   }
 }
 
 const uid = () => Math.random().toString(36).slice(2, 9)
+const pad = (n) => String(n).padStart(2, '0')
+const keyOf = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`
 
 export default function App() {
   const [data, setData] = useState(load)
-  const [activeKid, setActiveKid] = useState(data.kids[0]?.id)
-  const [catFilter, setCatFilter] = useState('すべて')
-  const [statusFilter, setStatusFilter] = useState('すべて')
-  const [showForm, setShowForm] = useState(false)
-  const [editingKid, setEditingKid] = useState(null)
+  const [tab, setTab] = useState('calendar')
+  const today = new Date()
+  const [ym, setYm] = useState({ y: today.getFullYear(), m: today.getMonth() })
+  const [selectedDay, setSelectedDay] = useState(null) // 'YYYY-MM-DD'
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
   }, [data])
 
-  const kid = data.kids.find((k) => k.id === activeKid) || data.kids[0]
+  const itemById = useMemo(() => {
+    const map = {}
+    data.items.forEach((it) => { map[it.id] = it })
+    return map
+  }, [data.items])
 
-  const kidItems = useMemo(
-    () => data.items.filter((it) => it.kidId === kid?.id),
-    [data.items, kid],
-  )
-
-  const visibleItems = useMemo(() => {
-    return kidItems.filter((it) => {
-      if (catFilter !== 'すべて' && it.category !== catFilter) return false
-      if (statusFilter !== 'すべて' && it.status !== statusFilter) return false
-      return true
-    })
-  }, [kidItems, catFilter, statusFilter])
-
-  const stats = useMemo(() => {
-    const active = kidItems.filter((i) => i.status === 'active')
-    const byCat = {}
-    active.forEach((i) => {
-      byCat[i.category] = (byCat[i.category] || 0) + 1
-    })
-    return {
-      total: active.length,
-      sizeout: kidItems.filter((i) => i.status === 'sizeout').length,
-      handme: kidItems.filter((i) => i.status === 'handmedown').length,
-      byCat,
-    }
-  }, [kidItems])
+  const loggedDays = Object.keys(data.log).filter((k) => (data.log[k] || []).length > 0).length
 
   function addItem(item) {
-    setData((d) => ({ ...d, items: [{ ...item, id: uid(), kidId: kid.id, addedAt: Date.now() }, ...d.items] }))
-    setShowForm(false)
-  }
-
-  function updateItem(id, patch) {
-    setData((d) => ({
-      ...d,
-      items: d.items.map((it) => (it.id === id ? { ...it, ...patch } : it)),
-    }))
+    setData((d) => ({ ...d, items: [{ ...item, id: uid() }, ...d.items] }))
   }
 
   function removeItem(id) {
-    if (!confirm('このアイテムを削除しますか？')) return
-    setData((d) => ({ ...d, items: d.items.filter((it) => it.id !== id) }))
+    if (!confirm('このお洋服を削除する？（記録からも消えます）')) return
+    setData((d) => {
+      const log = {}
+      Object.entries(d.log).forEach(([k, ids]) => {
+        const rest = ids.filter((x) => x !== id)
+        if (rest.length) log[k] = rest
+      })
+      return { items: d.items.filter((it) => it.id !== id), log }
+    })
   }
 
-  function passDown(id) {
-    const other = data.kids.find((k) => k.id !== kid.id)
-    if (!other) return
-    updateItem(id, { kidId: other.id, status: 'active' })
-  }
-
-  function saveKid(kidId, patch) {
-    setData((d) => ({
-      ...d,
-      kids: d.kids.map((k) => (k.id === kidId ? { ...k, ...patch } : k)),
-    }))
-    setEditingKid(null)
+  function toggleWorn(dayKey, itemId) {
+    setData((d) => {
+      const cur = d.log[dayKey] || []
+      const next = cur.includes(itemId) ? cur.filter((x) => x !== itemId) : [...cur, itemId]
+      const log = { ...d.log }
+      if (next.length) log[dayKey] = next
+      else delete log[dayKey]
+      return { ...d, log }
+    })
   }
 
   return (
     <div className="app">
-      <header className="masthead">
-        <p className="eyebrow">KIDS WARDROBE LEDGER</p>
-        <h1>こどもクローゼット</h1>
+      <header className="hero">
+        <h1><span className="hero-icon" aria-hidden="true">👗</span>わたしのコーデ帳</h1>
+        <p className="hero-stats">{data.items.length}着登録　{loggedDays}日分の記録</p>
       </header>
 
-      {/* 名札タブ */}
-      <nav className="nametags" aria-label="子どもの切り替え">
-        {data.kids.map((k) => (
-          <button
-            key={k.id}
-            className={`nametag ${k.id === kid?.id ? 'is-active' : ''}`}
-            onClick={() => setActiveKid(k.id)}
-          >
-            <span className="nametag-pin" aria-hidden="true" />
-            <span className="nametag-name">{k.name}</span>
-            <span className="nametag-size">サイズ {k.size}</span>
-          </button>
-        ))}
-      </nav>
-
-      <section className="kidbar">
-        {editingKid === kid.id ? (
-          <KidEditor kid={kid} onSave={(patch) => saveKid(kid.id, patch)} onCancel={() => setEditingKid(null)} />
+      <main className="content">
+        {tab === 'calendar' ? (
+          <Calendar
+            ym={ym}
+            setYm={setYm}
+            today={today}
+            log={data.log}
+            itemById={itemById}
+            onSelectDay={setSelectedDay}
+          />
         ) : (
-          <>
-            <div className="kidbar-stats">
-              <span><b>{stats.total}</b> 着 使用中</span>
-              {stats.sizeout > 0 && <span className="warn"><b>{stats.sizeout}</b> 着 サイズアウト</span>}
-              {stats.handme > 0 && <span className="handme"><b>{stats.handme}</b> 着 お下がり待ち</span>}
-            </div>
-            <button className="ghost" onClick={() => setEditingKid(kid.id)}>名前・サイズを変更</button>
-          </>
+          <Closet items={data.items} onAdd={addItem} onRemove={removeItem} />
         )}
-      </section>
-
-      {/* カテゴリ内訳 */}
-      {stats.total > 0 && (
-        <section className="catbreakdown">
-          {CATEGORIES.filter((c) => stats.byCat[c]).map((c) => (
-            <span key={c} className="catchip">
-              {c} <b>{stats.byCat[c]}</b>
-            </span>
-          ))}
-        </section>
-      )}
-
-      {/* フィルタ */}
-      <section className="filters">
-        <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label="カテゴリで絞り込み">
-          <option>すべて</option>
-          {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-        </select>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="状態で絞り込み">
-          <option value="すべて">すべての状態</option>
-          {Object.entries(STATUSES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-        </select>
-        <button className="primary" onClick={() => setShowForm(true)}>＋ 服を登録</button>
-      </section>
-
-      {showForm && <ItemForm defaultSize={kid.size} onSubmit={addItem} onCancel={() => setShowForm(false)} />}
-
-      {/* アイテム一覧 */}
-      <main className="items">
-        {visibleItems.length === 0 && (
-          <div className="empty">
-            <p>{kidItems.length === 0 ? `${kid.name}の服を登録して、クローゼットの台帳をつくりましょう。` : '条件に合う服がありません。フィルタを変えてみてください。'}</p>
-          </div>
-        )}
-        {visibleItems.map((it) => (
-          <article key={it.id} className={`item ${it.status !== 'active' ? 'is-muted' : ''}`}>
-            <div className="item-tag">
-              <span className="item-size">{it.size}</span>
-            </div>
-            <div className="item-body">
-              <div className="item-head">
-                <h2>{it.name}</h2>
-                <span className={`status ${STATUSES[it.status].cls}`}>{STATUSES[it.status].label}</span>
-              </div>
-              <p className="item-meta">{it.category} ・ {it.season}{it.memo ? ` ・ ${it.memo}` : ''}</p>
-              <div className="item-actions">
-                {it.status === 'active' && (
-                  <button onClick={() => updateItem(it.id, { status: 'sizeout' })}>サイズアウトにする</button>
-                )}
-                {it.status === 'sizeout' && (
-                  <>
-                    <button onClick={() => updateItem(it.id, { status: 'handmedown' })}>お下がり待ちへ</button>
-                    <button onClick={() => updateItem(it.id, { status: 'active' })}>使用中に戻す</button>
-                  </>
-                )}
-                {it.status === 'handmedown' && data.kids.length > 1 && (
-                  <button className="accent" onClick={() => passDown(it.id)}>
-                    {data.kids.find((k) => k.id !== kid.id)?.name}へお下がり
-                  </button>
-                )}
-                <button className="danger" onClick={() => removeItem(it.id)}>削除</button>
-              </div>
-            </div>
-          </article>
-        ))}
       </main>
 
-      <footer className="foot">
-        <p>データはこの端末のブラウザに保存されます</p>
-      </footer>
+      {selectedDay && (
+        <DaySheet
+          dayKey={selectedDay}
+          items={data.items}
+          worn={data.log[selectedDay] || []}
+          onToggle={(itemId) => toggleWorn(selectedDay, itemId)}
+          onClose={() => setSelectedDay(null)}
+          onGoCloset={() => { setSelectedDay(null); setTab('closet') }}
+        />
+      )}
+
+      <nav className="tabbar">
+        <button className={tab === 'calendar' ? 'is-active' : ''} onClick={() => setTab('calendar')}>
+          <span className="tab-emoji" aria-hidden="true">📅</span>カレンダー
+        </button>
+        <button className={tab === 'closet' ? 'is-active' : ''} onClick={() => setTab('closet')}>
+          <span className="tab-emoji" aria-hidden="true">👗</span>クローゼット
+        </button>
+      </nav>
     </div>
   )
 }
 
-function KidEditor({ kid, onSave, onCancel }) {
-  const [name, setName] = useState(kid.name)
-  const [size, setSize] = useState(kid.size)
-  return (
-    <div className="kideditor">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="なまえ" aria-label="名前" />
-      <input value={size} onChange={(e) => setSize(e.target.value)} placeholder="いまのサイズ" aria-label="サイズ" />
-      <button className="primary" onClick={() => onSave({ name: name.trim() || kid.name, size: size.trim() || kid.size })}>保存する</button>
-      <button className="ghost" onClick={onCancel}>やめる</button>
-    </div>
-  )
-}
+function Calendar({ ym, setYm, today, log, itemById, onSelectDay }) {
+  const { y, m } = ym
+  const firstDow = new Date(y, m, 1).getDay()
+  const daysInMonth = new Date(y, m + 1, 0).getDate()
+  const isThisMonth = today.getFullYear() === y && today.getMonth() === m
 
-function ItemForm({ defaultSize, onSubmit, onCancel }) {
-  const [name, setName] = useState('')
-  const [category, setCategory] = useState(CATEGORIES[0])
-  const [size, setSize] = useState(defaultSize || '')
-  const [season, setSeason] = useState(SEASONS[0])
-  const [memo, setMemo] = useState('')
+  const cells = []
+  for (let i = 0; i < firstDow; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
 
-  function submit() {
-    if (!name.trim()) return
-    onSubmit({ name: name.trim(), category, size: size.trim() || '-', season, memo: memo.trim(), status: 'active' })
+  function move(diff) {
+    setYm(({ y, m }) => {
+      const nm = m + diff
+      if (nm < 0) return { y: y - 1, m: 11 }
+      if (nm > 11) return { y: y + 1, m: 0 }
+      return { y, m: nm }
+    })
   }
 
   return (
-    <div className="form">
-      <h2>服を登録</h2>
-      <label>
-        なまえ
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例：しましまTシャツ" autoFocus />
-      </label>
-      <div className="form-row">
-        <label>
-          カテゴリ
-          <select value={category} onChange={(e) => setCategory(e.target.value)}>
-            {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-          </select>
-        </label>
-        <label>
-          サイズ
-          <input value={size} onChange={(e) => setSize(e.target.value)} placeholder="例：120" />
-        </label>
+    <section className="calendar">
+      <div className="cal-head">
+        <button className="cal-nav" onClick={() => move(-1)} aria-label="前の月">‹</button>
+        <h2>{y}年 {m + 1}月</h2>
+        <button className="cal-nav" onClick={() => move(1)} aria-label="次の月">›</button>
       </div>
-      <label>
-        季節
-        <select value={season} onChange={(e) => setSeason(e.target.value)}>
-          {SEASONS.map((s) => <option key={s}>{s}</option>)}
-        </select>
-      </label>
-      <label>
-        メモ（ブランド・買った場所など）
-        <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="例：ユニクロ / おばあちゃんから" />
-      </label>
-      <div className="form-actions">
-        <button className="primary" onClick={submit} disabled={!name.trim()}>登録する</button>
-        <button className="ghost" onClick={onCancel}>やめる</button>
+      <div className="cal-grid cal-week">
+        {WEEKDAYS.map((w, i) => (
+          <div key={w} className={`dow ${i === 0 ? 'sun' : ''} ${i === 6 ? 'sat' : ''}`}>{w}</div>
+        ))}
+      </div>
+      <div className="cal-grid">
+        {cells.map((d, i) => {
+          if (d === null) return <div key={`e${i}`} className="cell empty" />
+          const dow = i % 7
+          const dayKey = keyOf(y, m, d)
+          const worn = log[dayKey] || []
+          const isToday = isThisMonth && d === today.getDate()
+          return (
+            <button
+              key={dayKey}
+              className={`cell day ${isToday ? 'today' : ''}`}
+              onClick={() => onSelectDay(dayKey)}
+            >
+              <span className={`daynum ${dow === 0 ? 'sun' : ''} ${dow === 6 ? 'sat' : ''}`}>{d}</span>
+              <span className="cell-emojis">
+                {worn.slice(0, 3).map((id) => (
+                  <span key={id}>{itemById[id]?.emoji || '👚'}</span>
+                ))}
+                {worn.length > 3 && <span className="more">+{worn.length - 3}</span>}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <p className="cal-hint">日にちをタップして、その日きた服を記録できます</p>
+    </section>
+  )
+}
+
+function DaySheet({ dayKey, items, worn, onToggle, onClose, onGoCloset }) {
+  const [, mm, dd] = dayKey.split('-')
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="この日のコーデ">
+        <div className="sheet-grip" aria-hidden="true" />
+        <h2>{Number(mm)}月{Number(dd)}日のコーデ</h2>
+        {items.length === 0 ? (
+          <div className="sheet-empty">
+            <p>まだお洋服が登録されていません。</p>
+            <button className="primary" onClick={onGoCloset}>クローゼットに登録する</button>
+          </div>
+        ) : (
+          <div className="pick-list">
+            {items.map((it) => {
+              const on = worn.includes(it.id)
+              return (
+                <button key={it.id} className={`pick ${on ? 'is-on' : ''}`} onClick={() => onToggle(it.id)}>
+                  <span className="pick-emoji">{it.emoji}</span>
+                  <span className="pick-name">{it.name}</span>
+                  <span className="pick-check">{on ? '✓' : ''}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+        <button className="ghost close" onClick={onClose}>とじる</button>
       </div>
     </div>
+  )
+}
+
+function Closet({ items, onAdd, onRemove }) {
+  const [name, setName] = useState('')
+  const [cat, setCat] = useState(CATEGORIES[0])
+
+  function submit() {
+    if (!name.trim()) return
+    onAdd({ name: name.trim(), category: cat.name, emoji: cat.emoji })
+    setName('')
+  }
+
+  return (
+    <section className="closet">
+      <div className="add-card">
+        <h2>お洋服を登録</h2>
+        <div className="emoji-row" role="radiogroup" aria-label="カテゴリ">
+          {CATEGORIES.map((c) => (
+            <button
+              key={c.name}
+              role="radio"
+              aria-checked={cat.name === c.name}
+              className={`emoji-btn ${cat.name === c.name ? 'is-on' : ''}`}
+              onClick={() => setCat(c)}
+              title={c.name}
+            >
+              {c.emoji}
+            </button>
+          ))}
+        </div>
+        <p className="cat-label">{cat.name}</p>
+        <div className="add-row">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+            placeholder="例：いちごのTシャツ"
+            aria-label="お洋服の名前"
+          />
+          <button className="primary" onClick={submit} disabled={!name.trim()}>登録</button>
+        </div>
+      </div>
+
+      {items.length === 0 ? (
+        <p className="closet-empty">お気に入りのお洋服を登録して、コーデ帳をはじめましょう</p>
+      ) : (
+        <ul className="item-list">
+          {items.map((it) => (
+            <li key={it.id} className="item-row">
+              <span className="item-emoji">{it.emoji}</span>
+              <span className="item-name">{it.name}</span>
+              <span className="item-cat">{it.category}</span>
+              <button className="del" onClick={() => onRemove(it.id)} aria-label={`${it.name}を削除`}>×</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
