@@ -31,6 +31,30 @@ const uid = () => Math.random().toString(36).slice(2, 9)
 const pad = (n) => String(n).padStart(2, '0')
 const keyOf = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`
 
+/** 画像を縮小してdataURLに変換（端末保存の容量対策） */
+function compressImage(file, maxSide = 320, quality = 0.65) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const img = new Image()
+      img.onload = () => {
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height))
+        const w = Math.round(img.width * scale)
+        const h = Math.round(img.height * scale)
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+        resolve(canvas.toDataURL('image/jpeg', quality))
+      }
+      img.onerror = reject
+      img.src = reader.result
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 export default function App() {
   const [data, setData] = useState(load)
   const [tab, setTab] = useState('calendar')
@@ -168,9 +192,13 @@ function Calendar({ ym, setYm, today, log, itemById, onSelectDay }) {
             >
               <span className={`daynum ${dow === 0 ? 'sun' : ''} ${dow === 6 ? 'sat' : ''}`}>{d}</span>
               <span className="cell-emojis">
-                {worn.slice(0, 3).map((id) => (
-                  <span key={id}>{itemById[id]?.emoji || '👚'}</span>
-                ))}
+                {worn.slice(0, 3).map((id) => {
+                  const it = itemById[id]
+                  if (!it) return null
+                  return it.photo
+                    ? <img key={id} className="cell-thumb" src={it.photo} alt={it.name} />
+                    : <span key={id}>{it.emoji || '👚'}</span>
+                })}
                 {worn.length > 3 && <span className="more">+{worn.length - 3}</span>}
               </span>
             </button>
@@ -200,7 +228,9 @@ function DaySheet({ dayKey, items, worn, onToggle, onClose, onGoCloset }) {
               const on = worn.includes(it.id)
               return (
                 <button key={it.id} className={`pick ${on ? 'is-on' : ''}`} onClick={() => onToggle(it.id)}>
-                  <span className="pick-emoji">{it.emoji}</span>
+                  {it.photo
+                    ? <img className="pick-photo" src={it.photo} alt="" />
+                    : <span className="pick-emoji">{it.emoji}</span>}
                   <span className="pick-name">{it.name}</span>
                   <span className="pick-check">{on ? '✓' : ''}</span>
                 </button>
@@ -217,11 +247,32 @@ function DaySheet({ dayKey, items, worn, onToggle, onClose, onGoCloset }) {
 function Closet({ items, onAdd, onRemove }) {
   const [name, setName] = useState('')
   const [cat, setCat] = useState(CATEGORIES[0])
+  const [photo, setPhoto] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  async function onPhotoChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setBusy(true)
+    try {
+      setPhoto(await compressImage(file))
+    } catch {
+      alert('写真の読み込みに失敗しました。別の写真で試してください。')
+    } finally {
+      setBusy(false)
+      e.target.value = ''
+    }
+  }
 
   function submit() {
     if (!name.trim()) return
-    onAdd({ name: name.trim(), category: cat.name, emoji: cat.emoji })
-    setName('')
+    try {
+      onAdd({ name: name.trim(), category: cat.name, emoji: cat.emoji, photo })
+      setName('')
+      setPhoto(null)
+    } catch {
+      alert('保存できませんでした。端末の保存容量がいっぱいの可能性があります。使わない服を削除してみてください。')
+    }
   }
 
   return (
@@ -243,6 +294,15 @@ function Closet({ items, onAdd, onRemove }) {
           ))}
         </div>
         <p className="cat-label">{cat.name}</p>
+
+        <label className={`photo-pick ${photo ? 'has-photo' : ''}`}>
+          {photo
+            ? <img src={photo} alt="登録するお洋服の写真" />
+            : <span className="photo-pick-hint">{busy ? '読み込み中…' : '📷 写真をとる・えらぶ'}</span>}
+          <input type="file" accept="image/*" onChange={onPhotoChange} hidden />
+        </label>
+        {photo && <button className="ghost photo-clear" onClick={() => setPhoto(null)}>写真をけす</button>}
+
         <div className="add-row">
           <input
             value={name}
@@ -251,7 +311,7 @@ function Closet({ items, onAdd, onRemove }) {
             placeholder="例：いちごのTシャツ"
             aria-label="お洋服の名前"
           />
-          <button className="primary" onClick={submit} disabled={!name.trim()}>登録</button>
+          <button className="primary" onClick={submit} disabled={!name.trim() || busy}>登録</button>
         </div>
       </div>
 
@@ -261,7 +321,9 @@ function Closet({ items, onAdd, onRemove }) {
         <ul className="item-list">
           {items.map((it) => (
             <li key={it.id} className="item-row">
-              <span className="item-emoji">{it.emoji}</span>
+              {it.photo
+                ? <img className="item-photo" src={it.photo} alt={it.name} />
+                : <span className="item-emoji">{it.emoji}</span>}
               <span className="item-name">{it.name}</span>
               <span className="item-cat">{it.category}</span>
               <button className="del" onClick={() => onRemove(it.id)} aria-label={`${it.name}を削除`}>×</button>

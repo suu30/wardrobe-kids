@@ -258,3 +258,44 @@ button.ghost {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* 写真対応 */
+.cell-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+}
+.photo-pick {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  cursor: pointer;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.photo-pick.has-photo { border-style: solid; min-height: 0; }
+.photo-pick img { width: 100%; max-height: 180px; object-fit: contain; display: block; }
+.photo-pick-hint { font-size: 13px; color: var(--ink-soft); font-weight: 700; }
+.photo-clear { display: block; margin: 0 0 10px auto; font-size: 11px; padding: 5px 10px; }
+.item-photo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.pick-photo {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
